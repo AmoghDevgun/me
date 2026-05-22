@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenge 12 — DOM XSS #4 — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="../index.html">Writeups</a><span class="sep">/</span>YesWeHack<span class="sep">/</span>#12
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Web Security &middot; YesWeHack &middot; DOM XSS #4</div>
+        <h1 class="writeup-title">Leaking Through <em>Prototype</em> Getters</h1>
+        <p class="writeup-deck">
+          A closure-locked <code class="code">Secret</code> class stashes a flag on <code class="code">this</code>. Hijacking the event prototype turns a property read into an exfiltration primitive.
+        </p>
+      </header>
+
+      <h2>Description</h2>
+      <p>
+        A closure builds a <code class="code">Secret</code> class that keeps a flag on <code class="code">this.flag</code>. Validation runs by dispatching <code class="code">CustomEvent('validate', { detail: text })</code> and comparing <code class="code">e.detail === this.flag</code> inside the listener.
+      </p>
+
+      <h2>Code</h2>
+<pre class="code-block"><code>&lt;script&gt;
+const validate = (function () {
+    const SecretEvent = CustomEvent;
+    class Secret extends EventTarget {
+        constructor() {
+            super();
+            this.flag = `FLAG{${parseInt(Math.random() * Number.MAX_SAFE_INTEGER).toString(36)}}`;
+            this.addEventListener('validate', e =&gt; {
+                if (e.detail === this.flag) {
+                    result.innerHTML = 'Good! But can you leak the flag?';
+                } else {
+                    result.innerHTML = 'Wrong password!';
+                }
+            });
+        }
+        validate(text) {
+            this.dispatchEvent(new SecretEvent('validate', { detail: text }));
+        }
+    }
+    return text =&gt; { new Secret().validate(text) };
+})();
+&lt;/script&gt;
+&lt;script&gt;
+    EventTarget = null;
+    validate("hello");
+&lt;/script&gt;</code></pre>
+
+      <h2>What's Happening</h2>
+      <p>
+        The listener reads <code class="code">e.detail</code> while the secret lives on <code class="code">event.target</code>. If we can run code at the moment <code class="code">e.detail</code> is read, we get access to <code class="code">this.target.flag</code> &mdash; the flag itself.
+      </p>
+
+      <h2>The Exploit</h2>
+      <p>
+        Replace <code class="code">CustomEvent.prototype.detail</code> with a getter. When the listener reads <code class="code">e.detail</code>, the getter runs with <code class="code">this</code> bound to the event, so <code class="code">this.target</code> is the <code class="code">Secret</code> instance and <code class="code">this.target.flag</code> is the flag.
+      </p>
+
+<pre class="code-block"><code>new CustomEvent('').__proto__.__defineGetter__('detail', function () {
+    alert(this.target.flag);
+});</code></pre>
+
+      <h2>TL;DR</h2>
+      <p>
+        Mutate <code class="code">CustomEvent.prototype.detail</code> into a getter. When <code class="code">e.detail</code> is read, the getter runs, and <code class="code">this.target.flag</code> leaks out.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="../index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

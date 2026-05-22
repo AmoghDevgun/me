@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenge 13 — DOM XSS #5 via Prototype Pollution — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="../index.html">Writeups</a><span class="sep">/</span>YesWeHack<span class="sep">/</span>#13
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Web Security &middot; YesWeHack &middot; DOM XSS #5</div>
+        <h1 class="writeup-title">Polluting via <em>constructor.prototype</em></h1>
+        <p class="writeup-deck">
+          Underscores are banned and the payload must be valid JSON, so <code class="code">__proto__</code> is off the table. Reaching <code class="code">Object.prototype</code> through <code class="code">constructor.prototype</code> works just as well.
+        </p>
+      </header>
+
+      <h2>Description</h2>
+      <p>
+        A page merges a JSON config into an <code class="code">options</code> object via a recursive <code class="code">deepCopy</code>, then conditionally executes <code class="code">options.code</code> with <code class="code">new Function(options.code)()</code>. Two defences guard the merge:
+      </p>
+      <ul>
+        <li>Keys containing <code class="code">_</code> are blacklisted &mdash; <code class="code">"__proto__"</code> is out.</li>
+        <li>The config must be valid JSON, so there's no breaking out of the data layer with raw expressions.</li>
+      </ul>
+
+      <h2>Vulnerable Code</h2>
+<pre class="code-block"><code>&lt;script&gt;
+let options = { "_allowExecute": false };
+const config = "";
+
+function deepCopy(obj1, obj2) {
+    for (let x in obj2) {
+        if (typeof obj2[x] === 'object') {
+            obj1[x] = deepCopy(obj1[x] || {}, obj2[x]);
+        } else {
+            obj1[x] = obj2[x];
+        }
+    }
+    return obj1;
+}
+
+options = deepCopy(options, config);
+
+if (options._allowExecute !== true) {
+    delete options.code;
+}
+
+if (options.code) {
+    (new Function(options.code))();
+}
+&lt;/script&gt;</code></pre>
+
+      <h2>Why Common Payloads Fail</h2>
+      <p>
+        The standard prototype-pollution trick is to set <code class="code">"__proto__"</code> in JSON to mutate the prototype. Here every key with <code class="code">_</code> is rejected, so that path is closed. The valid-JSON requirement also blocks non-JSON tricks for reaching the prototype chain.
+      </p>
+
+      <h2>The Trick &mdash; <code class="code">constructor.prototype</code></h2>
+      <p>
+        Even with <code class="code">"__proto__"</code> off the table, every object inherits a <code class="code">constructor</code> property whose <code class="code">prototype</code> is the shared prototype object. The vulnerable <code class="code">deepCopy</code> uses <code class="code">obj1[x] || {}</code> when recursing &mdash; if <code class="code">obj1[x]</code> is the built-in <code class="code">Object</code> constructor (truthy), the function itself becomes the merge target, and its <code class="code">prototype</code> property is the real <code class="code">Object.prototype</code>.
+      </p>
+      <p>
+        Feed it <code class="code">"constructor": { "prototype": { ... } }</code> and the merger writes straight into <code class="code">Object.prototype</code>, creating inherited properties the script later reads.
+      </p>
+
+      <h2>Payload</h2>
+      <p>Valid JSON, no underscores, plants <code class="code">code</code> onto the prototype:</p>
+
+<pre class="code-block"><code>{ "constructor": { "prototype": { "code": "alert(window.name)" } } }</code></pre>
+
+      <h2>TL;DR</h2>
+      <p>
+        When <code class="code">__proto__</code> is blocked by an underscore filter and the input must stay JSON, you can still pollute prototypes through <code class="code">"constructor": { "prototype": ... }</code>. The merger uses the existing constructor function as its target, so writes land on the shared prototype. <code class="code">delete options.code</code> only removes the <em>own</em> property &mdash; the inherited one persists, and the page happily runs whatever it finds in <code class="code">options.code</code>.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="../index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

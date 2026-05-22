@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenge 5 — DOM XSS #2 — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="../index.html">Writeups</a><span class="sep">/</span>YesWeHack<span class="sep">/</span>#5
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Web Security &middot; YesWeHack &middot; DOM XSS #2</div>
+        <h1 class="writeup-title">Breaking a <em>One-Pass</em> Regex</h1>
+        <p class="writeup-deck">
+          Same script-injection shape as #3, but this time the blacklist is a regex that only looks once. Two forbidden characters slip past it cleanly.
+        </p>
+      </header>
+
+      <h2>Description</h2>
+      <p>Two user-controlled fields are inlined into a <code class="code">&lt;script&gt;</code> tag:</p>
+
+<pre class="code-block"><code>&lt;script&gt;
+const age =
+const name = ""
+if (age &gt; 18 &amp;&amp; name.length) {
+    document.write(`Welcome to my adult website ${name} 8=D`)
+} else {
+    document.write(`Go away`)
+}
+&lt;/script&gt;</code></pre>
+
+      <h2>Constraints</h2>
+      <ul>
+        <li><strong>age</strong> &mdash; maximum 2 characters, no blacklist.</li>
+        <li><strong>name</strong> &mdash; filtered through the regex <code class="code">[^a-z$`{}/]</code>.</li>
+      </ul>
+
+      <h2>Goal</h2>
+      <p>Trigger <code class="code">alert(window.name)</code>.</p>
+
+      <h2>Exploitation</h2>
+      <ol>
+        <li>Put a double quote and a backslash into <strong>age</strong>: <code class="code">"\</code>. The backslash escapes the newline so the next line continues the previous statement.</li>
+        <li>Start <strong>name</strong> with two semicolons, drop the payload, then close with <code class="code">//</code>: <code class="code">;;alert(window.name)//</code>.</li>
+        <li>The injected text becomes a fresh executable statement and the alert runs.</li>
+      </ol>
+
+      <h2>Proof of Concept</h2>
+      <ul>
+        <li><strong>age</strong>: <code class="code">"\</code></li>
+        <li><strong>name</strong>: <code class="code">;;alert(window.name)//</code></li>
+      </ul>
+
+      <h2>Why It Works</h2>
+      <p>
+        The backslash on <code class="code">age</code> escapes the literal newline in the generated source, gluing the <code class="code">name</code> line onto the previous statement. A leading <code class="code">;</code> opens a new statement and <code class="code">//</code> comments out the trailing characters.
+      </p>
+      <p>
+        The regex is the weak link &mdash; it scans for blacklisted characters <strong>once</strong>. Feed it two of the same forbidden character and the check passes both through, because nothing tracks that a violation already occurred.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="../index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

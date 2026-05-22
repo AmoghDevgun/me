@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>From Deobfuscation to a Live BotID Bypass — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="index.html">Writeups</a><span class="sep">/</span>Vercel BotID
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Reverse Engineering &middot; Vercel BotID</div>
+        <h1 class="writeup-title">From Deobfuscation to a Live <em>BotID Bypass</em></h1>
+        <p class="writeup-deck">
+          A great writeup got me to <em>understanding</em> Vercel's <code class="code">c.js</code> challenge. Replaying a passing request from a script &mdash; TLS fingerprint, AST interpreter, the lot &mdash; was a different problem.
+        </p>
+      </header>
+
+      <p>
+        A while back I read a great writeup on reverse engineering Vercel's BotID challenge. It walked through the structure of <code class="code">c.js</code>, the string-array obfuscator, the <code class="code">X(...)</code> function, and how the browser signal payload is shaped. I learned a lot from it &mdash; but it stopped at the <em>understanding</em> phase. It showed what the challenge does, not what it takes to actually replay a passing request from a script.
+      </p>
+
+      <p>
+        This post is the next step. I built a small CLI that takes a fresh <code class="code">c.js</code> URL, deobfuscates it, extracts the live crypto material out of the script, forges the encrypted fingerprint, and POSTs to a BotID-protected endpoint while the server returns <code class="code">{"isHuman":true,"isBot":false}</code>. Everything below is what I actually had to figure out to get that to work.
+      </p>
+
+      <p>
+        The repo: <code class="code">vercel-botid/</code> &mdash; <code class="code">run_flow.mjs</code> is the orchestrator, the rest are pieces it pulls in.
+      </p>
+
+      <h2>The flow at 30,000 feet</h2>
+
+<pre class="code-block"><code>c.js URL
+  │
+  ▼
+[impersonated Chrome fetch]   ← curl_cffi via a python subprocess
+  │
+  ▼  raw obfuscated source
+[analyze.js]                  ← deobfuscator (string-array + CF flattening)
+  │
+  ▼  output.js (readable)
+[extract_gz_ast.mjs]          ← mini AST interpreter pulls k, a, S out
+  │
+  ▼  G = k+a (PBKDF2 password), S (marker), Z (auto fingerprint)
+[encryptLikeD]                ← PBKDF2(SHA-256, 100k) + AES-GCM
+  │
+  ▼  s = base64(salt | iv | ciphertext)
+[extract tail X(...) args]    ← b, v, e (JWT-ish), d, vr
+  │
+  ▼  { b, v, e, s, d, vr }
+[post_contact_test.mjs]       ← POST with x-is-human header
+  │
+  ▼
+{"isHuman":true,"isBot":false,"isVerifiedBot":false,"bypassed":false}</code></pre>
+
+      <p>Each box is a thing the original writeup either glossed over or didn't touch. Worth unpacking the interesting ones.</p>
+
+      <h2>TLS fingerprinting is the first wall</h2>
+
+      <p>
+        This was the surprise. The first time I ran my deobfuscation tool against a freshly-fetched <code class="code">c.js</code>, my locally generated payload was perfect &mdash; same shape, same encryption, same X call &mdash; and the server still rejected it. After a lot of staring I realised the request fetching <code class="code">c.js</code> never made it past the edge. Or rather, it made it past, but the response I got back was a slightly different script tailored to a "suspect" client, so my extracted <code class="code">k</code>, <code class="code">a</code>, <code class="code">S</code> were already poisoned before deobfuscation even started.
+      </p>
+
+      <p>
+        Node's <code class="code">fetch</code> advertises a Node TLS handshake. Even with a perfect Chrome UA string, the JA3/JA4 fingerprint is wrong, and Vercel's edge knows. Fix: wrap <a href="https://github.com/lexiforest/curl_cffi" target="_blank" rel="noopener"><code class="code">curl_cffi</code></a> in a Python subprocess and shell out from Node. <code class="code">curl_cffi</code> ships with bundled BoringSSL builds that replay real Chrome handshakes (cipher order, ALPN, extensions, X25519MLKEM768 &mdash; the works).
+      </p>
+
+      <p>
+        The Node side is in <code class="code">curl_impersonate.mjs</code>. It JSON-encodes a request to stdin of a Python helper, the helper does the actual HTTP work, and prints <code class="code">{statusCode, body, url}</code> back on stdout:
+      </p>
+
+<pre class="code-block"><code>// vercel-botid/curl_impersonate.mjs
+output = execFileSync("python3", [pythonHelperPath], {
+  input: JSON.stringify({
+    url, method, headers, body,
+    impersonate: chrome.profile,   // e.g. "chrome142"
+    ...
+  }),
+  encoding: "utf8",
+});</code></pre>
+
+<pre class="code-block"><code># vercel-botid/curl_cffi_request.py
+from curl_cffi import requests
+response = requests.request(
+    method, url,
+    headers=headers, data=body,
+    impersonate=impersonate,
+    default_headers=False,   # critical: don't let curl_cffi add its own UA/Accept
+    ...
+)</code></pre>
+
+      <p>Two non-obvious things here:</p>
+      <ol>
+        <li><strong><code class="code">default_headers=False</code>.</strong> Without this, <code class="code">curl_cffi</code> quietly adds its own <code class="code">User-Agent</code>, <code class="code">Accept</code>, <code class="code">Accept-Encoding</code> etc. on top of whatever you passed. Now you have <em>two</em> <code class="code">User-Agent</code> headers (or one wrong one) and the fingerprint is off again. Turning defaults off lets the Node side dictate every byte of the header block.</li>
+        <li><strong>The Chrome profile string has to be live.</strong> I use <code class="code">chrome142</code> because that matches the version string in my <code class="code">User-Agent</code>. Mismatch the profile and the UA (say, <code class="code">chrome142</code> + a UA claiming <code class="code">131</code>) and the edge gets suspicious &mdash; h2 SETTINGS frames and the UA tell different stories.</li>
+      </ol>
+
+      <p>
+        The header set the orchestrator sends when fetching <code class="code">c.js</code> is documented in <code class="code">run_flow.mjs</code> &mdash; it's a faithful copy of what real Chrome sends for a top-level navigation: <code class="code">sec-fetch-site: none</code>, <code class="code">sec-fetch-mode: navigate</code>, <code class="code">priority: u=0, i</code>, the whole suite. Anything missing is a fingerprint.
+      </p>
+
+      <h2>Deobfuscation: just enough to keep moving</h2>
+
+      <p>
+        The original writeup explains the obfuscator beautifully so I won't re-tread it. The short version: there's a function that returns a giant string array, a self-shuffling IIFE that rotates the array a deterministic number of times, and a decoder that takes <code class="code">(0x&lt;index&gt;, &lt;salt&gt;)</code> and returns the real string.
+      </p>
+
+      <p>
+        My <code class="code">analyze.js</code> does essentially the standard thing: find the three pieces by structural signatures (array literal of all strings, while-loop IIFE, decoder calling the array function), evaluate them in a fresh <code class="code">vm</code> context to get a working <code class="code">decodeString</code>, then walk the AST replacing every <code class="code">(0x###, "salt")</code> call site with its string literal. After that, three folding passes for string concat, a numeric <code class="code">evaluate()</code> pass via Babel's built-in, and a control-flow-flattening resolver that hunts down the big proxy object (~15+ properties &mdash; strings, numbers, binary-op wrappers, and call wrappers) and inlines every reference.
+      </p>
+
+      <p>
+        The one part worth highlighting is the CF-flattening resolver, because it's the difference between "deobfuscated" and "actually readable". The proxy object looks roughly like:
+      </p>
+
+<pre class="code-block"><code>var Q = {
+  aB: "some-string",
+  cD: 0x42,
+  eF: function (a, b) { return a + b; },      // binary wrapper
+  gH: function (f, x, y) { return f(x, y); }, // call wrapper
+  ...
+};</code></pre>
+
+      <p>
+        Until you replace <code class="code">Q.eF(a, b)</code> with <code class="code">a + b</code> and <code class="code">Q.gH(f, x, y)</code> with <code class="code">f(x, y)</code> everywhere, the script reads like a state machine. After you do, the entire <code class="code">X(...)</code> payload-builder becomes obvious. My resolver classifies each property by its body shape and inlines call sites accordingly &mdash; see <code class="code">analyze.js:175</code>.
+      </p>
+
+      <p>
+        After all this <code class="code">output.js</code> is something a human can read. But I don't actually need a human reader &mdash; I need a <em>program</em> to read it. Which is the next problem.
+      </p>
+
+      <h2>A tiny AST interpreter to pull crypto material out</h2>
+
+      <p>
+        The challenge derives an encryption password at runtime by concatenating two values: call them <code class="code">k</code> and <code class="code">a</code>. Both get assigned inside the deobfuscated script, but their right-hand sides are non-trivial expressions involving <code class="code">btoa</code>, <code class="code">String</code>, member access on a <code class="code">var I = {...}</code> constants object, sometimes a <code class="code">String.fromCharCode</code> chain. Statically computable, but Node can't <code class="code">eval</code> them safely (they're embedded inside a larger script that does things you don't want to run).
+      </p>
+
+      <p>
+        So <code class="code">extract_gz_ast.mjs</code> ships a minimal Babel-AST evaluator &mdash; about 100 lines of <code class="code">evaluate(node, env)</code> &mdash; that supports exactly the node types these expressions use: literals, identifiers from a known env, unary/binary/logical ops, conditionals, member access, object/array expressions, and call expressions where the callee resolves to a function in the env. Everything else throws.
+      </p>
+
+      <p>
+        The env it runs in is hand-built: just <code class="code">String</code>, a polyfilled <code class="code">btoa</code>, and whatever it can extract from the <code class="code">var I = {...}</code> constants object in the same scope:
+      </p>
+
+<pre class="code-block"><code>// vercel-botid/extract_gz_ast.mjs:337
+function createEnvFromI(scopePath) {
+  const env = new Map();
+  env.set("String", String);
+  env.set("btoa", makeBtoa());
+
+  const iBinding = scopePath.scope.getBinding("I");
+  if (!iBinding?.path.isVariableDeclarator()) return env;
+  if (!t.isObjectExpression(iBinding.path.node.init)) return env;
+
+  env.set("I", evaluate(iBinding.path.node.init, env));
+  return env;
+}</code></pre>
+
+      <p>
+        Then for each target &mdash; <code class="code">k</code>, <code class="code">a</code>, and the <code class="code">S</code> property on the fingerprint object &mdash; I walk the AST looking for the assignment, evaluate the RHS in that env, and stash the value. There's a small heuristic to prefer assignments that reference <code class="code">I</code> (those are the "real" ones after deobfuscation, not earlier dead-store assignments). For <code class="code">S</code> specifically I prefer the property when it sits inside an object literal that has the full <code class="code">{p, w, s, h, b, d}</code> shape &mdash; that's the actual fingerprint object, not a decoy.
+      </p>
+
+      <p>
+        The output: <code class="code">G = k + a</code> (the PBKDF2 password), and <code class="code">S</code> (the marker that the server stamps the request with). Both are required and both change every time the server serves a fresh <code class="code">c.js</code>.
+      </p>
+
+      <h2>Re-implementing the encryption</h2>
+
+      <p>
+        The fingerprint object <code class="code">Z</code> (browser signals: <code class="code">{p, S, w, s, h, b, d}</code>) gets JSON-stringified, then encrypted in the browser using a routine that, after deobfuscation, is unambiguously WebCrypto's PBKDF2 + AES-GCM. Salt 16 bytes, IV 12 bytes, 100k iterations, SHA-256, AES-256-GCM, base64 of <code class="code">salt | iv | ciphertext+tag</code>.
+      </p>
+
+      <p>
+        Once you have <code class="code">G</code> (password) and <code class="code">Z</code> (payload), reimplementing this in Node is a 40-line function (<code class="code">run_flow.mjs:208</code>):
+      </p>
+
+<pre class="code-block"><code>const keyMaterial = await webcrypto.subtle.importKey(
+  "raw", enc.encode(password), "PBKDF2", false, ["deriveBits","deriveKey"]
+);
+const key = await webcrypto.subtle.deriveKey(
+  { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+  keyMaterial,
+  { name: "AES-GCM", length: 256 },
+  false, ["encrypt"]
+);
+const cipherBuffer = await webcrypto.subtle.encrypt(
+  { name: "AES-GCM", iv }, key, enc.encode(JSON.stringify(payload))
+);
+// combined = salt || iv || cipherBytes; return base64(combined)</code></pre>
+
+      <p>
+        The thing that took me by surprise: there's no MAC outside the AES-GCM tag. Once you have <code class="code">G</code>, you're done. There's no separate HMAC envelope, no separate signature on the payload &mdash; the integrity is purely "you know the password derived from <code class="code">k+a</code>, which means you successfully ran the script we just served you." Which is why fetching <code class="code">c.js</code> with the wrong TLS fingerprint matters so much: if the server gave you a different <code class="code">k</code>/<code class="code">a</code>, your derived key is wrong and decryption on the server fails.
+      </p>
+
+      <p>
+        The <code class="code">Z</code> builder is in <code class="code">run_flow.mjs:125</code>. It defaults everything to <code class="code">false</code> (no leaks detected, no headless flag, no automation hints) and pulls a <code class="code">(vendor, renderer)</code> tuple from a <code class="code">webgl.json</code> GPU fingerprint pool. Random selection &mdash; different machines have different GPUs, so a varying <code class="code">w</code> field is actually realistic. The <code class="code">s</code> slot (PBKDF2 marker) gets stamped with the <code class="code">S</code> we pulled out of the script.
+      </p>
+
+      <h2>The tail X(...) call</h2>
+
+      <p>
+        The challenge ends with a single call that takes 5 positional arguments. Three of them (<code class="code">b</code>, <code class="code">v</code>, <code class="code">vr</code>) are constants baked into this particular <code class="code">c.js</code>. One (<code class="code">e</code>) is a <code class="code">eyJ</code>-prefixed string &mdash; a JWT-shaped token, also baked in for this challenge &mdash; and <code class="code">d</code> is a constant the server uses to keep state. These are the values the server expects to see echoed back in the <code class="code">x-is-human</code> header so it can correlate the request to the challenge it issued.
+      </p>
+
+      <p>
+        Rather than try to <em>interpret</em> this call, I just <em>find</em> it: walk the AST for any <code class="code">CallExpression</code> with exactly five literal-ish arguments where arg[2] is a number, arg[3] is a string starting with <code class="code">eyJ</code>, and arg[4] is a string (<code class="code">run_flow.mjs:92</code>). One match per script. Pull those five values out, drop the <code class="code">s</code> we just computed in for the encrypted slot, and JSON-encode the result.
+      </p>
+
+      <p>That JSON is the <code class="code">x-is-human</code> token.</p>
+
+      <h2>Sending the request</h2>
+
+      <p>
+        <code class="code">post_contact_test.mjs</code> is the smallest piece &mdash; it takes a URL, a body, and the <code class="code">x-is-human</code> token (from argv or piped on stdin) and POSTs through the same <code class="code">curl_cffi</code> impersonator. The header set matters as much as it did for fetching <code class="code">c.js</code>, but now it's a CORS XHR not a navigation: <code class="code">sec-fetch-site: same-origin</code>, <code class="code">sec-fetch-mode: cors</code>, <code class="code">sec-fetch-dest: empty</code>, <code class="code">accept: */*</code>, <code class="code">priority: u=1, i</code>. Plus three Vercel-specific headers the BotID client SDK adds in real browsers: <code class="code">x-is-human</code> (the token), <code class="code">x-path</code> (the destination pathname), <code class="code">x-method</code> (the actual method).
+      </p>
+
+      <p>When everything lines up, the BotID-protected endpoint returns:</p>
+
+<pre class="code-block"><code>{"isHuman":true,"isBot":false,"isVerifiedBot":false,"bypassed":false}</code></pre>
+
+      <p>
+        <code class="code">bypassed: false</code> is the prize. It means we didn't take the developer escape hatch (<code class="code">x-botid-bypass: &lt;secret&gt;</code>) &mdash; the server actually ran our payload through its detection and concluded we were a human in a real Chrome.
+      </p>
+
+      <h2>What I'd do differently</h2>
+
+      <p>A few notes for anyone walking this road:</p>
+
+      <ul>
+        <li><strong>Don't try to fetch <code class="code">c.js</code> from Node <code class="code">fetch</code> or stock <code class="code">curl</code>.</strong> You'll waste hours debugging deobfuscation that's perfectly correct against a script the server poisoned. Get the network layer right first.</li>
+        <li><strong>The CF-flattening proxy is the gatekeeper to readability.</strong> If you skip it, you'll think you need to interpret a state machine to find <code class="code">k</code> and <code class="code">a</code>. Once it's inlined, the assignments are right there.</li>
+        <li><strong>Keep an AST evaluator instead of running the deobfuscated code.</strong> It's tempting to <code class="code">vm.runInNewContext(output.js)</code> and pluck the values out of the resulting context. Don't. The script does network I/O, touches <code class="code">window</code>, sets timers, and is generally hostile. A 100-line interpreter that only handles what the constant expressions need is safer and faster.</li>
+        <li><strong>The <code class="code">webgl.json</code> fingerprint pool needs to be real.</strong> Hand-rolled <code class="code">(vendor, renderer)</code> tuples that don't correspond to a shipped GPU/driver combo are an obvious tell. I scraped a public dataset of real WebGL fingerprints and normalized to <code class="code">{v, r}</code>.</li>
+      </ul>
+
+      <p>
+        The original writeup was the map. This was the trip. Both are necessary &mdash; you can't write the second without first reading something like the first &mdash; but the gap between "I understand what the script does" and "I can replay a successful request whenever I want" turned out to be most of the work.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenge 3 — DOM XSS #1 — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="../index.html">Writeups</a><span class="sep">/</span>YesWeHack<span class="sep">/</span>#3
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Web Security &middot; YesWeHack &middot; DOM XSS #1</div>
+        <h1 class="writeup-title">Newline-Escaping the <em>Blacklist</em></h1>
+        <p class="writeup-deck">
+          Two fields are injected into a <code class="code">&lt;script&gt;</code> tag with a tight character blacklist. A single backslash turns the assignment into a one-liner and the alert fires.
+        </p>
+      </header>
+
+      <h2>Description</h2>
+      <p>The challenge inlines two user-controlled fields directly into a <code class="code">&lt;script&gt;</code> tag:</p>
+
+<pre class="code-block"><code>&lt;script&gt;
+const age =
+const name = ""
+if (age &gt; 18 &amp;&amp; name.length) {
+    document.write(`Welcome to my adult website ${name} 8=D`)
+} else {
+    document.write(`Go away`)
+}
+&lt;/script&gt;</code></pre>
+
+      <h2>Constraints</h2>
+      <ul>
+        <li><strong>age</strong> &mdash; maximum 2 characters, no blacklist.</li>
+        <li><strong>name</strong> &mdash; blacklist forbids <code class="code">&lt;</code>, <code class="code">&gt;</code>, <code class="code">|</code>, <code class="code">'</code>, <code class="code">"</code>.</li>
+      </ul>
+
+      <h2>Goal</h2>
+      <p>Trigger <code class="code">alert(window.name)</code>.</p>
+
+      <h2>Exploitation</h2>
+      <ol>
+        <li>Put a single backslash in the <strong>age</strong> field: <code class="code">\</code>.</li>
+        <li>That backslash escapes the newline the server inserts, so the next line becomes a continuation of the <code class="code">age</code> assignment instead of a new statement.</li>
+        <li>Craft <strong>name</strong> to start with <code class="code">;</code> (closing whatever expression is open), drop the payload, and finish with <code class="code">//</code> to comment out the trailing characters: <code class="code">;alert(window.name)//</code>.</li>
+        <li>The combined script becomes syntactically valid and the alert runs &mdash; no angle brackets or quotes required.</li>
+      </ol>
+
+      <h2>Proof of Concept</h2>
+      <ul>
+        <li><strong>age</strong>: <code class="code">\</code></li>
+        <li><strong>name</strong>: <code class="code">;alert(window.name)//</code></li>
+      </ul>
+
+      <h2>Why It Works</h2>
+      <p>
+        The trailing backslash on the <code class="code">age</code> line escapes the literal newline in the generated source, so the parser stitches the <code class="code">name</code> line onto the previous one. Starting <code class="code">name</code> with a semicolon opens a fresh statement, and the trailing <code class="code">//</code> comments out the rest. No <code class="code">&lt;</code>, <code class="code">&gt;</code>, or quotes are ever needed &mdash; the blacklist looks the wrong way.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="../index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

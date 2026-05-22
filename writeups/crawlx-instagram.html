@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How I Beat Instagram's Anti-Scraping Stack — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="index.html">Writeups</a><span class="sep">/</span>crawlX
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Anti-Bot Bypass &middot; Instagram &middot; crawlX</div>
+        <h1 class="writeup-title">How I Beat Instagram's <em>Anti-Scraping</em> Stack</h1>
+        <p class="writeup-deck">
+          About thirty small things stacked on top of each other &mdash; TLS fingerprint, header dance, dynamic referer, cookie set, GraphQL doc IDs, residential proxies. Take any one away and the whole thing falls back to a 10% success rate.
+        </p>
+      </header>
+
+      <p>
+        For the last few weeks I've been building <strong>crawlX</strong> &mdash; a service that pulls Instagram profiles, posts, reels and comments at a rate that's actually useful. Anyone who's tried this knows the depressing pattern: the first ten requests work, the next ten get a <code class="code">401</code>, and by request thirty you're staring at a checkpoint page asking you to log in from a "trusted device." Instagram's anti-bot stack is one of the meanest on the public internet.
+      </p>
+
+      <p>This is the story of what broke, what worked, and the parts that took me three rewrites to figure out.</p>
+
+      <h2>The naive attempt (and why it dies in 30 seconds)</h2>
+
+      <p>
+        The first thing every tutorial tells you to do is hit <code class="code">https://www.instagram.com/{username}/?__a=1</code>. That endpoint has been dead for years. The slightly less dead one is:
+      </p>
+
+<pre class="code-block"><code>GET https://www.instagram.com/api/v1/users/web_profile_info/?username={u}</code></pre>
+
+      <p>
+        You can curl this from your terminal with a real browser User-Agent. It works&hellip; once. Then Instagram fingerprints you and you start getting <code class="code">401 Unauthorized</code> no matter how perfect your headers look. The User-Agent isn't the problem. The headers aren't the problem. <strong>You are the problem.</strong> Specifically, your TLS handshake is.
+      </p>
+
+      <h2>The TLS fingerprint wall</h2>
+
+      <p>
+        Python's default <code class="code">requests</code> library uses OpenSSL with a cipher suite ordering that no real browser uses. Meta's edge can read your TLS ClientHello &mdash; the JA3/JA4 fingerprint &mdash; and know within microseconds whether you're a Chrome on Windows or a Python script pretending to be one. No amount of header spoofing fixes this.
+      </p>
+
+      <p>
+        The fix is <code class="code">curl_cffi</code>, a Python binding over a patched curl that ships actual Chrome TLS internals:
+      </p>
+
+<pre class="code-block"><code>from curl_cffi import requests
+
+response = requests.get(
+    url,
+    headers=headers,
+    cookies=COOKIES,
+    impersonate="chrome",
+    timeout=30,
+)</code></pre>
+
+      <p>
+        That single <code class="code">impersonate="chrome"</code> argument changed my success rate from "around 10%" to "around 60%." The remaining 40% is everything below.
+      </p>
+
+      <h2>The header dance</h2>
+
+      <p>
+        Once the TLS fingerprint is fixed, the headers start mattering again &mdash; but not the obvious ones. Instagram's web client sends a handful of internal-looking headers that the server actually checks:
+      </p>
+
+<pre class="code-block"><code>"x-asbd-id":          "...",   # anti-spam build digest
+"x-csrftoken":        "...",   # tied to your cookies
+"x-ig-app-id":        "...",   # web app identifier
+"x-ig-www-claim":     "...",   # session-bound claim token
+"x-web-session-id":   "...",
+"x-requested-with":   "XMLHttpRequest",</code></pre>
+
+      <p>
+        These aren't documented anywhere. I pulled them out of devtools, then watched which ones the server actually inspected by removing them one at a time and watching what flipped to <code class="code">401</code>. <code class="code">x-ig-app-id</code> and <code class="code">x-csrftoken</code> are non-negotiable. <code class="code">x-ig-www-claim</code> is the one that quietly burns down your session if it doesn't match your cookies &mdash; request looks fine, returns 200, payload is missing the user object.
+      </p>
+
+      <p>The Client Hints headers also matter more than I expected:</p>
+
+<pre class="code-block"><code>"sec-ch-ua-full-version-list": '"Not(A:Brand";v="8.0.0.0", "Chromium";v="144.0.7559.133", "Google Chrome";v="144.0.7559.133"',
+"sec-ch-ua-platform-version":  '"19.0.0"',
+"sec-ch-ua-mobile":            "?0",</code></pre>
+
+      <p>
+        If your <code class="code">sec-ch-ua</code> says Chrome 144 but your User-Agent says Chrome 119, Instagram knows. Keep them in sync and bump them together when Chrome ships a new stable.
+      </p>
+
+      <h2>The dynamic referer trick</h2>
+
+      <p>
+        Here's the thing that took me embarrassingly long to figure out. When I'd scrape user A, the referer would still be set to user B from the previous call, because I was reusing one big <code class="code">HEADERS</code> dict. Instagram silently degrades responses when the referer doesn't match the resource you're asking for. You don't get an error &mdash; you get a <em>thinner payload</em>. The post count drops. The bio links disappear.
+      </p>
+
+<pre class="code-block"><code>headers = {**HEADERS, "referer": f"https://www.instagram.com/{username}/"}</code></pre>
+
+      <p>A per-request shallow copy of the headers with a freshly-stamped referer. Trivial. Took me half a day to notice the payload was wrong.</p>
+
+      <h2>The endpoint hiding in the APK</h2>
+
+      <p>
+        The web API is deliberately handicapped &mdash; it returns enough to render the site, not enough to actually download what's on it. The mobile client knows more. So I rooted a spare Android, pulled the APK, and went looking for what the web traffic never shows.
+      </p>
+
+      <p>
+        What you find through that route is a different surface area: endpoints in the same <code class="code">/api/v1/</code> namespace whose response shapes carry fields the web client never asks for &mdash; direct media URLs for reels being the obvious one. Once you've got the request shape, you can replay it from the scraper with a Chrome-on-Android <code class="code">curl_cffi</code> profile and mobile auth headers instead of the web cookie jar. It's the single biggest payload upgrade in the codebase, and there's no way to find it from web traffic alone.
+      </p>
+
+      <h2>The three real endpoints</h2>
+
+      <p>Instagram has three production endpoints I ended up calling, and they each behave differently:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Resource</th>
+            <th>Endpoint</th>
+            <th>Verb</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Profile</td>
+            <td><code class="code">/api/v1/users/web_profile_info/?username=...</code></td>
+            <td>GET</td>
+          </tr>
+          <tr>
+            <td>Posts</td>
+            <td><code class="code">/graphql/query</code> with <code class="code">doc_id=25345334665119661</code></td>
+            <td>POST</td>
+          </tr>
+          <tr>
+            <td>Reels</td>
+            <td><code class="code">/api/v1/clips/user/</code></td>
+            <td>POST</td>
+          </tr>
+          <tr>
+            <td>Comments</td>
+            <td><code class="code">/graphql/query</code> with <code class="code">doc_id=25060748103519434</code></td>
+            <td>POST</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        The GraphQL endpoint is where the real meat lives. You don't write a query &mdash; you pass a pre-registered <code class="code">doc_id</code> (a persisted query hash) and a <code class="code">variables</code> JSON blob. Those doc IDs change every few months. When the payload suddenly comes back empty, that's the first thing to check.
+      </p>
+
+      <p>
+        Comments were extra fun because the GraphQL endpoint takes a numeric <code class="code">media_id</code>, not a shortcode. The conversion is base64-with-a-custom-alphabet:
+      </p>
+
+<pre class="code-block"><code>ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+def shortcode_to_media_id(shortcode: str) -&gt; str:
+    media_id = 0
+    for c in shortcode:
+        media_id = media_id * 64 + ALPHABET.index(c)
+    return str(media_id)</code></pre>
+
+      <p>
+        Reels were the most annoying &mdash; the clips endpoint takes a numeric <code class="code">target_user_id</code>, not a username. So every reel scrape is actually two requests: resolve the username to an ID via the profile endpoint, then page through <code class="code">/clips/user/</code> with <code class="code">max_id</code> cursors. I cache the username&rarr;id mapping for an hour to halve the request count.
+      </p>
+
+      <h2>Proxies and the bandwidth bill</h2>
+
+      <p>
+        Residential proxies are non-negotiable &mdash; without IP rotation a single host gets soft-banned in about four minutes of sustained scraping. The catch is that they bill by <strong>bandwidth</strong>, not requests. End-to-end, with the full payload, a profile call comes out to roughly <em>100&nbsp;MB per 1000 requests</em>. Worth knowing before you point the scraper at a five-thousand-username list.
+      </p>
+
+      <h2>Streaming results back</h2>
+
+      <p>
+        The scraper takes long enough that a synchronous HTTP request is a bad UX. Instead, every scraper endpoint streams NDJSON:
+      </p>
+
+<pre class="code-block"><code>def _ndjson(obj: dict) -&gt; bytes:
+    return (json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8")
+
+yield _ndjson({"type": "progress", "attempt": attempt, "status": "fetching"})
+...
+yield _ndjson({"type": "post", "data": post})
+...
+yield _ndjson({"type": "complete", "scraped": yielded})</code></pre>
+
+      <p>
+        The frontend gets progress events as each page is fetched, individual posts/reels as they're extracted, and a final <code class="code">complete</code> message. The backend doesn't have to buffer a 5MB response &mdash; it pipes it straight through.
+      </p>
+
+      <h2>What I'd do differently</h2>
+
+      <p>A few things I'd skip if I were starting over:</p>
+
+      <ul>
+        <li><strong>Don't bother with <code class="code">requests</code> + a custom adapter.</strong> Just use <code class="code">curl_cffi</code> from day one. Every hour spent fighting OpenSSL cipher ordering is an hour you could have spent on actual logic.</li>
+        <li><strong>Build the traffic counter on day one,</strong> not day fifteen. You will be wrong about how much bandwidth you're using, by an order of magnitude, in both directions.</li>
+        <li><strong>Cache the username &rarr; user ID resolution.</strong> It's a free 50% reduction in profile-endpoint hits for any flow that touches reels.</li>
+        <li><strong>Watch the payload shape, not just the status code.</strong> A <code class="code">200</code> that quietly drops fields is the worst possible failure mode and it's how Instagram tells you "we noticed."</li>
+      </ul>
+
+      <h2>Closing</h2>
+
+      <p>
+        Bypassing Instagram isn't one trick. It's about thirty small things stacked on top of each other &mdash; the TLS fingerprint, the cookie set, the dynamic referer, the GraphQL doc IDs, the per-endpoint pagination, the retry-but-not-on-401 policy, the residential proxy, the streaming protocol, the traffic accounting. Take any one of them out and the whole thing falls back to a 10% success rate.
+      </p>
+
+      <p>
+        The lesson I keep relearning: <strong>the public web isn't really public.</strong> It's a permission system that happens to be enforced by HTTP. Once you start seeing it that way, scraping stops feeling like coding and starts feeling like protocol archaeology. Which is, honestly, the fun part.
+      </p>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>

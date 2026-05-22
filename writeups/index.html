@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Writeups — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">Writeups</div>
+  </nav>
+
+  <main>
+    <header class="writeup-header">
+      <div class="writeup-eyebrow">Security Research &middot; CTFs &middot; Bug Bounty</div>
+      <h1 class="writeup-title">Writeups &amp; <em>Notebooks</em></h1>
+      <p class="writeup-deck">
+        Working notes from CTF challenges and bug-bounty programs &mdash; how the bug was found, what it touches, and what makes it tick.
+      </p>
+    </header>
+
+    <section class="index-section">
+      <div class="index-section-title">Anti-Bot Bypass</div>
+      <ul class="index-list">
+
+        <a class="index-row" href="./crawlx-instagram.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">Anti-Scraping</span>
+            <span class="index-row-num">Instagram &middot; crawlX</span>
+          </div>
+          <div class="index-row-title">How I Beat Instagram's Anti-Scraping Stack</div>
+          <p class="index-row-desc">TLS impersonation via <code class="code">curl_cffi</code>, the undocumented <code class="code">x-ig-*</code> header set, the GraphQL <code class="code">doc_id</code> dance &mdash; and a rooted-Android detour through the decompiled APK to a reel endpoint the web client never touches.</p>
+        </a>
+
+        <a class="index-row" href="./vercel-botid-bypass.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">Reverse Engineering</span>
+            <span class="index-row-num">Vercel BotID</span>
+          </div>
+          <div class="index-row-title">From Deobfuscation to a Live BotID Bypass</div>
+          <p class="index-row-desc">TLS impersonation via <code class="code">curl_cffi</code>, a mini AST interpreter to extract <code class="code">k</code>/<code class="code">a</code>/<code class="code">S</code> out of the deobfuscated <code class="code">c.js</code>, then a PBKDF2 + AES-GCM forge that lands a passing <code class="code">x-is-human</code> token.</p>
+        </a>
+
+      </ul>
+    </section>
+
+    <section class="index-section">
+      <div class="index-section-title">YesWeHack</div>
+      <ul class="index-list">
+
+        <a class="index-row" href="./yeswehack/chall3.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#3</span>
+          </div>
+          <div class="index-row-title">Newline-Escaping the Blacklist</div>
+          <p class="index-row-desc">A trailing backslash in one field merges two script lines into a single statement, slipping past a strict character blacklist.</p>
+        </a>
+
+        <a class="index-row" href="./yeswehack/chall5.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#5</span>
+          </div>
+          <div class="index-row-title">Breaking a One-Pass Regex</div>
+          <p class="index-row-desc">Same script-injection shape as #3, but the blacklist is a regex that only checks once &mdash; two forbidden characters slip past it cleanly.</p>
+        </a>
+
+        <a class="index-row" href="./yeswehack/chall7.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#7</span>
+          </div>
+          <div class="index-row-title">Walking Around the WAF</div>
+          <p class="index-row-desc">A homebrew sanitiser misclassifies a prototype-tampered payload, so a classic <code class="code">&lt;img onerror&gt;</code> sails straight to <code class="code">document.write</code>.</p>
+        </a>
+
+        <a class="index-row" href="./yeswehack/chall12.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#12</span>
+          </div>
+          <div class="index-row-title">Leaking Through Prototype Getters</div>
+          <p class="index-row-desc">A closure-locked class keeps its flag on <code class="code">this</code>. Hijacking <code class="code">CustomEvent.prototype.detail</code> turns a property read into an exfiltration primitive.</p>
+        </a>
+
+        <a class="index-row" href="./yeswehack/chall13.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">Prototype Pollution</span>
+            <span class="index-row-num">#13</span>
+          </div>
+          <div class="index-row-title">Polluting via constructor.prototype</div>
+          <p class="index-row-desc">When <code class="code">__proto__</code> is blocked by an underscore filter, <code class="code">constructor.prototype</code> still routes writes straight onto <code class="code">Object.prototype</code>.</p>
+        </a>
+
+      </ul>
+    </section>
+
+    <footer class="writeup-footer">
+      <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+      <a class="writeup-back-link" href="../index.html#blog">&larr; back to portfolio</a>
+    </footer>
+  </main>
+
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenge 7 — DOM XSS #3 — Amogh Devgun</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">
+      <a href="../index.html">Writeups</a><span class="sep">/</span>YesWeHack<span class="sep">/</span>#7
+    </div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Web Security &middot; YesWeHack &middot; DOM XSS #3</div>
+        <h1 class="writeup-title">Walking Around the <em>WAF</em></h1>
+        <p class="writeup-deck">
+          A homebrew sanitiser recursively scrubs a config object before <code class="code">document.write</code>. Its type checks misclassify a crafted payload and a classic <code class="code">&lt;img onerror&gt;</code> sails through.
+        </p>
+      </header>
+
+      <h2>Description</h2>
+      <p>
+        The application takes a <code class="code">config</code> object, runs a homebrew WAF over it, then prints a greeting. The WAF recurses through keys and values, but its object/type checks are flawed &mdash; a crafted payload bypasses the string blacklist and reaches <code class="code">document.write</code>.
+      </p>
+
+<pre class="code-block"><code>&lt;script&gt;
+const config = ""
+
+function isObject(o) {
+    const proto = Object.getPrototypeOf(o)
+    return typeof o === "object" &amp;&amp; proto !== null &amp;&amp; proto.constructor.name === "Object"
+}
+
+function WAF(x) {
+    const forbiden = ["&lt;", "&gt;", "'", '"', "?"]
+    if (x === null || typeof x === "number" || typeof x === "boolean") return x
+    if (isObject(x))   return Object.fromEntries(Object.entries(x).map(([k, v]) =&gt; [WAF(k), WAF(v)]))
+    if (Array.isArray(x)) return x.map(x =&gt; WAF(x))
+    for (const needle of forbiden) {
+        if (x.includes(needle)) throw new Error("Haking attempt detected.")
+    }
+    return x
+}
+
+function getMessage(config) {
+    try {
+        WAF(config)
+        Object.setPrototypeOf(config, null)
+        const name = config.name || "Guest"
+        return `Hello ${name}`
+    } catch (e) {
+        return e.message
+    }
+}
+document.write(getMessage(config))
+&lt;/script&gt;</code></pre>
+
+      <h2>Constraints</h2>
+      <ul>
+        <li>The WAF dispatches on type: objects recurse, arrays map, strings scan for forbidden characters.</li>
+        <li>String scan blocks: <code class="code">&lt;</code>, <code class="code">&gt;</code>, <code class="code">'</code>, <code class="code">"</code>, <code class="code">?</code>.</li>
+      </ul>
+
+      <h2>Goal</h2>
+      <p>Execute arbitrary JavaScript through <code class="code">document.write</code>.</p>
+
+      <h2>Exploitation</h2>
+      <ol>
+        <li>Supply a JSON object that overwrites <code class="code">__proto__</code> with an array and stashes the payload in <code class="code">name</code>:</li>
+      </ol>
+
+<pre class="code-block"><code>{"__proto__": [], "name": "&lt;img src=x onerror=alert(1)&gt;"}</code></pre>
+
+      <ol start="2">
+        <li>When the WAF runs, the flawed type detection lets the payload slip past the string blacklist entirely.</li>
+        <li>The code then calls <code class="code">Object.setPrototypeOf(config, null)</code>, reads <code class="code">config.name</code>, and hands the raw string to <code class="code">document.write</code>.</li>
+        <li>The browser parses the injected <code class="code">&lt;img&gt;</code> tag &mdash; the broken <code class="code">src</code> fires <code class="code">onerror</code>, and <code class="code">alert(1)</code> runs.</li>
+      </ol>
+
+      <h2>Why It Works</h2>
+      <p>Four implementation mistakes line up:</p>
+      <ul>
+        <li><strong>Weak object detection.</strong> <code class="code">isObject</code> checks <code class="code">constructor.name === "Object"</code>, which is fooled by prototype-tampered objects and non-plain objects alike.</li>
+        <li><strong>Order of handling.</strong> The dispatch tries object recursion first, then array handling, then string scanning. Anything that hides from the first two paths is never string-checked.</li>
+        <li><strong>Prototype confusion.</strong> Supplying <code class="code">"__proto__"</code> in JSON mutates the prototype chain. The WAF only inspects entries it can iterate over &mdash; properties hidden in the prototype, or that change iteration behaviour, escape inspection.</li>
+        <li><strong>Unsafe sink.</strong> After the WAF clears, <code class="code">document.write</code> renders <code class="code">config.name</code> verbatim. Any HTML with event handlers executes immediately &mdash; classic XSS.</li>
+      </ul>
+
+      <footer class="writeup-footer">
+        <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+        <a class="writeup-back-link" href="../index.html">&larr; all writeups</a>
+      </footer>
+    </article>
+  </main>
+
+</body>
+</html>
