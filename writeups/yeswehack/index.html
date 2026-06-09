@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YesWeHack CTF Writeups — Amogh Devgun</title>
+  <meta name="description" content="CTF challenge writeups from YesWeHack — DOM XSS, prototype pollution, WAF bypass, and more by Amogh Devgun." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">YesWeHack Writeups</div>
+  </nav>
+
+  <main>
+    <header class="writeup-header">
+      <div class="writeup-eyebrow">YesWeHack CTF &middot; Web Security</div>
+      <h1 class="writeup-title">YesWeHack <em>Writeups</em></h1>
+      <p class="writeup-deck">
+        Five challenges from the YesWeHack CTF series &mdash; DOM XSS techniques,
+        prototype pollution, and WAF bypass tricks, each broken down step by step.
+      </p>
+    </header>
+
+    <section class="index-section">
+      <div class="index-section-title">DOM XSS</div>
+      <ul class="index-list">
+
+        <a class="index-row" href="./chall3.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#3</span>
+          </div>
+          <div class="index-row-title">Newline-Escaping the Blacklist</div>
+          <p class="index-row-desc">A trailing backslash in one field merges two script lines into a single statement, slipping past a strict character blacklist with neither angle brackets nor quotes.</p>
+        </a>
+
+        <a class="index-row" href="./chall5.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#5</span>
+          </div>
+          <div class="index-row-title">Breaking a One-Pass Regex</div>
+          <p class="index-row-desc">Same script-injection shape as #3, but the blacklist is a regex that only checks once &mdash; two forbidden characters slip past it cleanly.</p>
+        </a>
+
+        <a class="index-row" href="./chall7.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#7</span>
+          </div>
+          <div class="index-row-title">Walking Around the WAF</div>
+          <p class="index-row-desc">A homebrew sanitiser misclassifies a prototype-tampered payload, so a classic <code class="code">&lt;img onerror&gt;</code> sails straight to <code class="code">document.write</code>.</p>
+        </a>
+
+        <a class="index-row" href="./chall12.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">DOM XSS</span>
+            <span class="index-row-num">#12</span>
+          </div>
+          <div class="index-row-title">Leaking Through Prototype Getters</div>
+          <p class="index-row-desc">A closure-locked class keeps its flag on <code class="code">this</code>. Hijacking <code class="code">CustomEvent.prototype.detail</code> turns a property read into an exfiltration primitive.</p>
+        </a>
+
+      </ul>
+    </section>
+
+    <section class="index-section">
+      <div class="index-section-title">Prototype Pollution</div>
+      <ul class="index-list">
+
+        <a class="index-row" href="./chall13.html">
+          <div class="index-row-meta">
+            <span class="index-row-tag">Prototype Pollution</span>
+            <span class="index-row-num">#13</span>
+          </div>
+          <div class="index-row-title">Polluting via constructor.prototype</div>
+          <p class="index-row-desc">When <code class="code">__proto__</code> is blocked by an underscore filter and the input must stay valid JSON, <code class="code">constructor.prototype</code> still routes writes straight onto <code class="code">Object.prototype</code>.</p>
+        </a>
+
+      </ul>
+    </section>
+
+    <footer class="writeup-footer">
+      <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+      <a class="writeup-back-link" href="../../index.html#blog">&larr; back to portfolio</a>
+    </footer>
+  </main>
+
+</body>
+</html>

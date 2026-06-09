@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reverse-Engineering a Sketchy Streaming Site's Video Pipeline - Amogh Devgun</title>
+  <meta name="description" content="How I reverse-engineered a streaming site's HLS video pipeline: anti-debug bypass, manifest extraction, and a Python PoC." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <nav>
+    <a class="nav-back" href="../index.html#blog">&larr; <em>Amogh Devgun</em></a>
+    <div class="nav-crumb">Writeups <span class="sep">/</span> Reverse Engineering</div>
+  </nav>
+
+  <main>
+    <article>
+      <header class="writeup-header">
+        <div class="writeup-eyebrow">Reverse Engineering &middot; HLS &middot; Anti-Debug</div>
+        <h1 class="writeup-title">I Got Annoyed by Ads on a "Free" Streaming Site (Aye aye captain!), So I Reverse-Engineered Its <em>Entire Video Pipeline</em></h1>
+        <p class="writeup-deck">
+          It had way too many ads and I just wanted a direct solution. What began as a quick look into an overly aggressive frontend ended with
+          reverse engineering the player, bypassing anti-debugging logic, extracting
+          the HLS manifest, and building a Python PoC.
+        </p>
+        <p style="margin-top:1.2rem; font-family:var(--font-sans); font-size:0.8rem; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--accent2); border-radius:6px; padding:0.75rem 1rem; max-width:640px; line-height:1.6;">
+          <strong style="color:var(--ink);">Disclaimer:</strong> This post is purely a technical analysis of client-side web technologies: HLS streaming, JavaScript anti-debugging, and server architecture. I'm not linking to, naming, or endorsing any specific site. Everything discussed here uses standard web APIs fully visible in any browser's developer tools.
+        </p>
+      </header>
+
+      <h2>Step 1: Why Does Opening DevTools Break the Page?</h2>
+      <p>
+        The instant I opened Chrome DevTools, the video page locked up. The Sources panel showed
+        execution paused on a <code>debugger</code> statement inside a wall of obfuscated JavaScript.
+      </p>
+
+      <img src="../edited/0.1-relevant.png" alt="Obfuscated anti-debugging script with a debugger statement inside a timing loop" style="width:100%;border-radius:8px;border:1px solid var(--border);margin:1.5rem 0;" />
+
+      <p>Here's what's visible in the code:</p>
+      <ol>
+        <li>A <code>check()</code> function runs on a recurring timer via <code>setTimeout(check, 0x6f)</code>.</li>
+        <li>It records a timestamp <em>before</em> and <em>after</em> a <code>debugger</code> statement using <code>new Date()</code>.</li>
+        <li>If the gap exceeds <code>minimalUserResponseInMiliseconds</code> (set to <code>0xde</code>), it hits a branch that calls into <code>document</code> and <code>self</code> (the exact action is obfuscated).</li>
+        <li>If not, it nulls out the timestamps and loops again.</li>
+      </ol>
+      <p>The fix was trivial: comment out the debugger statement lol.</p>
+
+      <h2>Step 2: Following the Bytes</h2>
+      <p>
+        With the debugger out of the way, I switched to the Network panel and hit play.
+        Requests started rolling in: small, sequential chunks of binary data.
+      </p>
+
+      <img src="../edited/1-relevant.png" alt="Network panel showing a media segment request with response headers" style="width:100%;border-radius:8px;border:1px solid var(--border);margin:1.5rem 0;" />
+
+      <p>What the response headers confirmed:</p>
+      <ul>
+        <li><strong>Content-Type: <code>video/mp2t</code></strong>: MPEG Transport Stream segments, confirming HLS streaming.</li>
+        <li><strong>Content-Length: 40992</strong>: Small, uniform chunks fetched sequentially.</li>
+        <li><strong>Accept-Ranges: bytes</strong>: The server supports byte-range requests.</li>
+        <li><strong>Connection: keep-alive</strong>: Persistent connections for the segment fetch chain.</li>
+        <li><strong>Request URL</strong>: A signed URL (redacted), with auth tokens baked into the query string.</li>
+      </ul>
+
+      <h2>Step 3: The Playlist</h2>
+      <p>
+        Knowing the segments were HLS, I looked for the manifest. It was right there in the
+        Network panel: a standard <code>#EXTM3U</code> master playlist:
+      </p>
+
+      <img src="../edited/2-relevant.png" alt="HLS master playlist response showing stream variants" style="width:100%;border-radius:8px;border:1px solid var(--border);margin:1.5rem 0;" />
+
+      <p>What the playlist contained:</p>
+      <ul>
+        <li><strong><code>#EXT-X-STREAM-INF</code></strong> with <code>BANDWIDTH=4500000</code>, <code>CODECS="avc1.640028,mp4a.40.2"</code>, <code>RESOLUTION=1920x1080</code> (a 1080p variant with H.264 video and AAC audio).</li>
+        <li>Two additional redacted entries for <strong>720p</strong> and <strong>360p</strong> variants.</li>
+        <li>Each variant points to a separate rendition playlist URL (redacted).</li>
+      </ul>
+      <p>Standard HLS hierarchy: master playlist, rendition playlists, <code>.ts</code> segments.</p>
+
+      <h2>Step 4: Where Does It All Come From?</h2>
+      <p>
+        The last question: how does the player get the playlist URL? I inspected the initial
+        page HTML and found the answer. Everything was injected inline via <code>&lt;script&gt;</code> tags:
+      </p>
+
+      <img src="../edited/3-relevant.png" alt="Page source showing inline JavaScript configuration objects" style="width:100%;border-radius:8px;border:1px solid var(--border);margin:1.5rem 0;" />
+
+      <div class="code-block"><code>window.video = {
+    id: /* redacted */,
+    filename: '',
+};
+
+window.streams = [{
+    "name": "Server1",
+    "active": true,
+    /* playlist URL redacted */
+}, {
+    "name": "Server2",
+    /* playlist URL redacted */
+}];
+
+window.masterPlaylist = {
+    params: {
+        /* token params redacted */
+    },
+    /* master playlist URL redacted */
+};
+
+window.canPlayFHD = true;</code></div>
+
+      <ul>
+        <li><strong><code>window.video</code></strong>: Video ID and filename.</li>
+        <li><strong><code>window.streams</code></strong>: Two video servers (<code>Server1</code>, <code>Server2</code>), with <code>Server1</code> marked <code>active: true</code>.</li>
+        <li><strong><code>window.masterPlaylist</code></strong>: Master playlist URL with authentication token parameters.</li>
+        <li><strong><code>window.canPlayFHD = true</code></strong>: A boolean flag for full HD playback.</li>
+        <li>The page also contained a <code>&lt;div id="player" class="loading"&gt;</code> and a <code>&lt;button id="btn-play" onclick="loadPlayer()"&gt;</code>.</li>
+      </ul>
+      <p>All of this was available in the initial HTML response, meaning no follow-up API calls were needed to reconstruct the config.</p>
+
+      <h2>The Full Request Chain</h2>
+      <div class="code-block"><code>1. Browser loads embed page
+2. HTML response contains inline &lt;script&gt; with:
+   - window.video (metadata)
+   - window.streams (Server1, Server2 with signed playlist URLs)
+   - window.masterPlaylist (URL + token params)
+3. Player fetches master playlist (#EXTM3U)
+4. Master playlist lists quality variants:
+   - 1080p: 4.5 Mbps, avc1.640028 + mp4a.40.2, 1920x1080
+   - 720p, 360p (details redacted)
+5. Player fetches rendition playlist for selected quality
+6. Rendition playlist contains .ts segment URLs
+7. Player fetches video/mp2t segments (~40KB each)</code></div>
+
+      <h2>Proof of Concept</h2>
+      <p>
+        Once I understood the full chain, I wrote a quick Python script to automate it.
+        Three requests, a couple of regex pulls, and you've got a direct HLS playlist URL:
+        no browser, no ads, no pop-ups.
+      </p>
+
+      <div class="code-block"><code>import re
+import sys
+import requests
+
+movie_id = sys.argv[1]
+
+headers = {
+    "accept": "application/json, text/plain, */*",
+    "accept-language": "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+    "priority": "u=1, i",
+    "referer": f"https://SITE_DOMAIN/movie/{movie_id}",
+    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-storage-access": "active",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+}
+
+base = "https://SITE_DOMAIN"
+
+# Step 1: Hit the API to get the embed URL
+r = requests.get(f"{base}/api/movie/{movie_id}", headers=headers)
+embed_url = r.json()["src"]
+
+# Step 2: Fetch the embed page, extract config from inline JS
+r = requests.get(base + embed_url, headers=headers)
+html = r.text
+
+playlist_url = re.search(r"url:\s*'([^']+)'", html).group(1)
+token        = re.search(r"'token'\s*:\s*'([^']+)'", html).group(1)
+expires      = re.search(r"'expires'\s*:\s*'([^']+)'", html).group(1)
+
+# Step 3: Build the signed master playlist URL
+final_url = f"{playlist_url}?token={token}&amp;expires={expires}"
+print(final_url)</code></div>
+
+      <p>The script maps directly to the request chain described above:</p>
+      <ol>
+        <li><strong><code>/api/movie/{id}</code></strong> returns a JSON response containing the embed page URL (<code>src</code> field).</li>
+        <li>The embed page HTML contains the playlist URL, token, and expiry (the same <code>window.masterPlaylist</code> config from Step 4), extracted here with regex.</li>
+        <li>Combine them into a signed URL, and you have a direct HLS playlist.</li>
+      </ol>
+
+      <h3>Playback</h3>
+      <p>The output URL is a standard HLS master playlist. Any player that supports HLS can play it directly:</p>
+      <div class="code-block"><code># mpv
+mpv "PASTE_URL_HERE"
+
+# VLC
+vlc "PASTE_URL_HERE"</code></div>
+      <p>No ads. No pop-ups. No anti-debugger traps. Just the video.</p>
+
+      <h2>What I Actually Learned</h2>
+      <p>
+        What started as a simple desire to watch a video without being bombarded by ads turned into an interesting dive into client-side video players. Here is the core of what I uncovered:
+      </p>
+      <ol>
+        <li><strong>Timing-based Anti-Debugging:</strong> The site relied on a basic <code>debugger</code> loop that measured execution time. Simply deactivating breakpoints rendered it useless.</li>
+        <li><strong>Standard HLS Streaming:</strong> The underlying video delivery was just standard HTTP Live Streaming using <code>#EXTM3U</code> manifests and <code>video/mp2t</code> segments.</li>
+        <li><strong>Inline Configuration:</strong> The player's entire initial state (metadata, server endpoints, and auth tokens) was baked right into the HTML response, making it trivial to extract without complex API sniffing.</li>
+      </ol>
+      <p>
+        In the end, I got my direct, ad-free solution. The whole detour was a fun reminder that complex-looking obfuscation often hides very standard, easily reverse-engineered web technologies. Surprisingly, this is how a lot of other services run too.
+      </p>
+
+    </article>
+
+    <footer class="writeup-footer">
+      <span class="writeup-byline">written by <em>Amogh Devgun</em></span>
+      <a class="writeup-back-link" href="../index.html#blog">&larr; back to portfolio</a>
+    </footer>
+  </main>
+
+</body>
+</html>

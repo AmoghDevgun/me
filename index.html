@@ -914,7 +914,85 @@
       margin: 0 0.5rem;
     }
 
-    /* ── RESPONSIVE ─────────────────────── */
+    /* ── ARCHIVE ───────────────────────── */
+    .blog-archive {
+      margin-top: 3rem;
+      border-top: 1px solid var(--rule);
+      padding-top: 1.8rem;
+    }
+
+    .archive-label {
+      font-family: var(--font-serif);
+      font-size: 0.82rem;
+      font-style: italic;
+      color: var(--muted);
+      letter-spacing: 0.01em;
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .archive-label::before {
+      content: '—';
+      color: var(--rule);
+      font-style: normal;
+    }
+
+    .archive-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.7rem 0.25rem;
+      border-top: 1px solid var(--rule);
+      text-decoration: none;
+      transition: padding 0.2s;
+    }
+
+    .archive-row:last-child { border-bottom: 1px solid var(--rule); }
+    .archive-row:hover { padding-left: 0.6rem; }
+    .archive-row:hover .archive-row-title { color: var(--accent); }
+
+    .archive-row-title {
+      font-family: var(--font-serif);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+      transition: color 0.2s;
+    }
+
+    .archive-row-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-shrink: 0;
+    }
+
+    .archive-row-tag {
+      font-family: var(--font-sans);
+      font-size: 0.65rem;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+      border: 1px solid var(--rule);
+      padding: 0.08rem 0.45rem;
+      border-radius: 999px;
+    }
+
+    .archive-view-all {
+      margin-top: 1rem;
+      font-family: var(--font-serif);
+      font-style: italic;
+      font-size: 0.82rem;
+      color: var(--accent);
+      text-decoration: none;
+      display: inline-block;
+      transition: opacity 0.2s;
+    }
+    .archive-view-all:hover { opacity: 0.7; }
+
+    /* ── RESPONSIVE ───────────────────── */
     @media (max-width: 640px) {
       nav { padding: 1rem 1.2rem; }
       .nav-links { gap: 1.2rem; }
@@ -947,8 +1025,8 @@
   <nav>
     <div class="nav-logo">Amogh <em>D.</em></div>
     <ul class="nav-links">
-      <li><a href="#about">About</a></li>
       <li><a href="#blog">Blog</a></li>
+      <li><a href="#about">About</a></li>
       <li><a href="#skills">Skills</a></li>
       <li><a href="#experience">Experience</a></li>
       <li><a href="#projects">Projects</a></li>
@@ -969,9 +1047,8 @@
         <img class="hero-portrait" src="me%20pfp.jpg" alt="Portrait of Amogh Devgun" />
       </div>
       <p class="hero-title">
-        Computer Science undergrad at Manipal University Jaipur. I build
-        full-stack systems, break things <em>ethically</em>, and spend too
-        much time at the intersection of software engineering and
+        I build full-stack systems, break things <em>ethically</em>, and spend
+        too much time at the intersection of software engineering and
         cybersecurity.
       </p>
       <div class="hero-contacts">
@@ -992,6 +1069,91 @@
           GitHub
         </a>
       </div>
+    </section>
+    <section id="blog">
+      <div class="section-label">Blog &amp; Writeups</div>
+      <p style="color: var(--text); margin-bottom: 2rem; font-size: 0.92rem;">Security research writeups, reverse engineering breakdowns, and technical deep-dives.</p>
+      <div class="blog-grid fade-in">
+
+        <div class="blog-category">Anti-Bot Bypass</div>
+
+
+        <a class="blog-card featured" href="./writeups/streaming-site-re.html">
+          <div class="blog-meta">
+            <span class="featured-pin">Featured</span>
+            <span class="blog-tag rev">Reverse Engineering</span>
+            <span class="blog-date">HLS &middot; Anti-Debug</span>
+          </div>
+          <div class="blog-title">Reverse-Engineering a Streaming Site's Entire Video Pipeline</div>
+          <p class="blog-excerpt">
+            Began as a quick look into an overly aggressive frontend and ended with reverse engineering the player, bypassing anti-debugging logic, extracting the HLS manifest, and building a Python PoC.
+          </p>
+          <span class="blog-read-more">Read writeup &#8594;</span>
+        </a>
+
+        <a class="blog-card featured" href="./writeups/vercel-botid-bypass.html">
+          <div class="blog-meta">
+            <span class="featured-pin">Featured</span>
+            <span class="blog-tag rev">Reverse Engineering</span>
+            <span class="blog-date">Vercel BotID</span>
+          </div>
+          <div class="blog-title">From Deobfuscation to a Live BotID Bypass</div>
+          <p class="blog-excerpt">
+            Going from understanding Vercel's <code>c.js</code> challenge to actually replaying a passing request. This involved using TLS impersonation with <code>curl_cffi</code>, building a mini AST interpreter to extract crypto material, and creating the PBKDF2 + AES-GCM forge to generate a passing <code>x-is-human</code> token.
+          </p>
+          <span class="blog-read-more">Read writeup &#8594;</span>
+        </a>
+
+
+      </div>
+
+      <!-- Archive -->
+      <div class="blog-archive">
+        <div class="archive-label">Archive &mdash; Web Security CTF</div>
+
+        <a class="archive-row" href="./writeups/yeswehack/chall3.html">
+          <div class="archive-row-title">Newline-Escaping the Blacklist</div>
+          <div class="archive-row-meta">
+            <span class="archive-row-tag">DOM XSS</span>
+            <span class="archive-row-tag">YesWeHack #3</span>
+          </div>
+        </a>
+
+        <a class="archive-row" href="./writeups/yeswehack/chall5.html">
+          <div class="archive-row-title">Breaking a One-Pass Regex</div>
+          <div class="archive-row-meta">
+            <span class="archive-row-tag">DOM XSS</span>
+            <span class="archive-row-tag">YesWeHack #5</span>
+          </div>
+        </a>
+
+        <a class="archive-row" href="./writeups/yeswehack/chall7.html">
+          <div class="archive-row-title">Walking Around the WAF</div>
+          <div class="archive-row-meta">
+            <span class="archive-row-tag">DOM XSS</span>
+            <span class="archive-row-tag">YesWeHack #7</span>
+          </div>
+        </a>
+
+        <a class="archive-row" href="./writeups/yeswehack/chall12.html">
+          <div class="archive-row-title">Leaking Through Prototype Getters</div>
+          <div class="archive-row-meta">
+            <span class="archive-row-tag">DOM XSS</span>
+            <span class="archive-row-tag">YesWeHack #12</span>
+          </div>
+        </a>
+
+        <a class="archive-row" href="./writeups/yeswehack/chall13.html">
+          <div class="archive-row-title">Polluting via constructor.prototype</div>
+          <div class="archive-row-meta">
+            <span class="archive-row-tag">Prototype Pollution</span>
+            <span class="archive-row-tag">YesWeHack #13</span>
+          </div>
+        </a>
+
+        <a class="archive-view-all" href="./writeups/yeswehack/index.html">View all YesWeHack writeups &#8594;</a>
+      </div>
+
     </section>
 
     <!-- ABOUT -->
@@ -1047,117 +1209,6 @@
       </div>
     </section>
 
-    <!-- BLOG -->
-    <section id="blog">
-      <div class="section-label">Blog & Writeups</div>
-      <p style="color: var(--text); margin-bottom: 2rem; font-size: 0.92rem; max-width: 600px;">
-        Security research writeups, reverse engineering breakdowns, and technical deep-dives.
-      </p>
-      <div class="blog-grid fade-in">
-
-        <div class="blog-category">Anti-Bot Bypass</div>
-
-        <a class="blog-card featured" href="./writeups/crawlx-instagram.html">
-          <div class="blog-meta">
-            <span class="featured-pin">Featured</span>
-            <span class="blog-tag rev">Anti-Scraping</span>
-            <span class="blog-date">Instagram &middot; crawlX</span>
-          </div>
-          <div class="blog-title">How I Beat Instagram's Anti-Scraping Stack</div>
-          <p class="blog-excerpt">
-            TLS impersonation via <code>curl_cffi</code>, the undocumented <code>x-ig-*</code> header set, the GraphQL <code>doc_id</code> dance &mdash; and the part where I rooted an Android and pulled an endpoint out of the decompiled APK that the web client never touches.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card featured" href="./writeups/vercel-botid-bypass.html">
-          <div class="blog-meta">
-            <span class="featured-pin">Featured</span>
-            <span class="blog-tag rev">Reverse Engineering</span>
-            <span class="blog-date">Vercel BotID</span>
-          </div>
-          <div class="blog-title">From Deobfuscation to a Live BotID Bypass</div>
-          <p class="blog-excerpt">
-            Going from <em>understanding</em> Vercel's <code>c.js</code> challenge to actually replaying a passing request &mdash; TLS impersonation via <code>curl_cffi</code>, a mini AST interpreter to extract crypto material, and the PBKDF2 + AES-GCM forge that lands a passing <code>x-is-human</code> token.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <div class="blog-category">Web Security</div>
-
-        <a class="blog-card" href="./writeups/yeswehack/chall3.html">
-          <div class="blog-meta">
-            <span class="blog-tag sec">DOM XSS</span>
-            <span class="blog-date">YesWeHack #3</span>
-          </div>
-          <div class="blog-title">Newline-Escaping the Blacklist</div>
-          <p class="blog-excerpt">
-            A trailing backslash in one field merges two script lines into a single statement, slipping past a strict character blacklist with neither angle brackets nor quotes.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card" href="./writeups/yeswehack/chall5.html">
-          <div class="blog-meta">
-            <span class="blog-tag sec">DOM XSS</span>
-            <span class="blog-date">YesWeHack #5</span>
-          </div>
-          <div class="blog-title">Breaking a One-Pass Regex</div>
-          <p class="blog-excerpt">
-            Same script-injection shape as #3, but the blacklist is a regex that only checks once &mdash; two forbidden characters slip past it cleanly.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card" href="./writeups/yeswehack/chall7.html">
-          <div class="blog-meta">
-            <span class="blog-tag sec">DOM XSS</span>
-            <span class="blog-date">YesWeHack #7</span>
-          </div>
-          <div class="blog-title">Walking Around the WAF</div>
-          <p class="blog-excerpt">
-            A homebrew sanitiser misclassifies a prototype-tampered payload, so a classic <code>&lt;img onerror&gt;</code> sails straight to <code>document.write</code>.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card" href="./writeups/yeswehack/chall12.html">
-          <div class="blog-meta">
-            <span class="blog-tag sec">DOM XSS</span>
-            <span class="blog-date">YesWeHack #12</span>
-          </div>
-          <div class="blog-title">Leaking Through Prototype Getters</div>
-          <p class="blog-excerpt">
-            A closure-locked class keeps its flag on <code>this</code>. Hijacking <code>CustomEvent.prototype.detail</code> turns a property read into an exfiltration primitive.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card" href="./writeups/yeswehack/chall13.html">
-          <div class="blog-meta">
-            <span class="blog-tag sec">Prototype Pollution</span>
-            <span class="blog-date">YesWeHack #13</span>
-          </div>
-          <div class="blog-title">Polluting via constructor.prototype</div>
-          <p class="blog-excerpt">
-            When <code>__proto__</code> is blocked by an underscore filter and the input must stay valid JSON, <code>constructor.prototype</code> still routes writes straight onto <code>Object.prototype</code>.
-          </p>
-          <span class="blog-read-more">Read writeup &#8594;</span>
-        </a>
-
-        <a class="blog-card" href="https://github.com/AmoghDevgun/flow-chan" target="_blank" rel="noopener">
-          <div class="blog-meta">
-            <span class="blog-tag sec">Tooling</span>
-          </div>
-          <div class="blog-title">Building a DOM XSS Taint Analyzer</div>
-          <p class="blog-excerpt">
-            How I built a static analysis tool that traces tainted data from user-controlled sources to dangerous sinks across multi-file JavaScript codebases, with AI-powered explanations.
-          </p>
-          <span class="blog-read-more">Read on GitHub &#8594;</span>
-        </a>
-
-      </div>
-    </section>
 
     <!-- SKILLS -->
     <section id="skills">
